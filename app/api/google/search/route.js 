@@ -1,0 +1,34 @@
+import { NextResponse } from 'next/server';
+import googleIt from 'google-it';
+
+export async function GET(request) {
+  const { searchParams } = new URL(request.url);
+  const query = searchParams.get('q');
+
+  if (!query) {
+    return NextResponse.json(
+      { error: 'Falta el parámetro "q" (búsqueda)' },
+      { status: 400 }
+    );
+  }
+
+  try {
+    const results = await googleIt({ query, noDisplay: true });
+    
+    const resultados = results.slice(0, 5).map(result => ({
+      titulo: result.title,
+      link: result.link,
+      snippet: result.snippet
+    }));
+
+    return NextResponse.json({
+      exito: true,
+      resultados
+    });
+  } catch (error) {
+    return NextResponse.json(
+      { error: 'Error al buscar en Google' },
+      { status: 500 }
+    );
+  }
+}
