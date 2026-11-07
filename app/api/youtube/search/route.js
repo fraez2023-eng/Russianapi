@@ -1,11 +1,10 @@
 import { NextResponse } from 'next/server';
 
-// Lista de instancias de Invidious (si una falla, usa otra)
-const INSTANCIAS = [
-  'https://inv.nadeko.net',
-  'https://invidious.fdn.fr',
-  'https://yt.artemislena.eu',
-  'https://invidious.privacyredirect.com'
+// Instancias públicas de Piped (scrapers de YouTube)
+const PIPED_INSTANCES = [
+  'https://pipedapi.kavin.rocks',
+  'https://api.piped.yt',
+  'https://pipedapi.adminforge.de'
 ];
 
 export async function GET(request) {
@@ -13,41 +12,45 @@ export async function GET(request) {
   const query = searchParams.get('q');
 
   if (!query) {
-    return NextResponse.json({ error: 'Falta el parámetro q' }, { status: 400 });
+    return NextResponse.json({ error: 'Falta el parámetro ?q= (ej: ?q=bad bunny)' }, { status: 400 });
   }
 
-  for (const instancia of INSTANCIAS) {
+  for (const instance of PIPED_INSTANCES) {
     try {
-      const response = await fetch(
-        `${instancia}/api/v1/search?q=${encodeURIComponent(query)}&type=video`,
-        { next: { revalidate: 60 } }
-      );
+      // Hacemos el scraping a la API de Piped
+      const res = await fetch(`${instance}/search?q=${encodeURIComponent(query)}&filter=videos`, {
+        next: { revalidate: 120 } // Caché de 2 minutos para que sea instantáneo
+      });
 
-      if (!response.ok) continue;
+      if (!res.ok) continue; // Si falla esta instancia, prueba la siguiente
 
-      const data = await response.json();
+      const data = await res.json();
 
-      const videos = data.slice(0, 5).map(video => ({
-        titulo: video.title,
-        autor: video.author,
-        videoId: video.videoId,
-        duracion: video.lengthSeconds,
-        vistas: video.viewCount,
-        url: `https://youtube.com/watch?v=${video.videoId}`,
-        thumbnail: video.videoThumbnails?.[0]?.url
-      }));
+      // Filtramos y limpiamos los datos para tu bot
+      const resultados = data.items
+        .filter(item => item.type === 'stream') // Solo videos
+        .slice(0, 5) // Top 5 resultados
+        .map(item => ({
+          titulo: item.title,
+          canal: item.uploaderName,
+          duracion: Math.floor(item.duration / 60) + ':' + String(item.duration % 60).padStart(2, '0'),
+          vistas: item.views,
+          subidos: item.uploadedDate,
+          url: `https://youtube.com/watch?v=${item.url.replace('/watch?v=', '')}`,
+          thumbnail: item.thumbnail
+        }));
 
       return NextResponse.json({
-        exito: true,
-        resultados: videos
+        status: 'success',
+        query: query,
+        total: resultados.length,
+        data: resultados
       });
+
     } catch (error) {
-      continue;
+      continue; // Sigue intentando con la siguiente instancia
     }
   }
 
-  return NextResponse.json(
-    { error: 'No se pudo conectar con YouTube' },
-    { status: 500 }
-  );
+  return NextResponse.json({ error: 'Todos los scrapers fallaron, intenta de nuevo en unos minutos.' }, { status: 500 });
 }
